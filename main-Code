@@ -1,0 +1,510 @@
+#pragma warning(disable:4996)
+#pragma warning(disable:26495)
+#pragma warning(disable:6385)
+#pragma comment(lib,"user32.lib")
+#include<iostream>
+#include<stdlib.h>
+#include<graphics.h>
+#include<string.h>
+#include<time.h>
+#include<string>
+#define WIDTH 550
+#define HEIGHT 750
+#define GetKey(X) (GetAsyncKeyState(X) & 0x8000)
+using namespace std;
+typedef long long ll;
+int Width, Height;
+struct Game {
+	Game(int Width,int Height):Edge((Width - BG_W) / 2), Box_Gap((BG_W - 4 * Box_W) / 5),score(0),best(0),isGameOver(false) {
+		srand(time(NULL));
+		GetLocalTime(&systime);
+		setbkmode(TRANSPARENT);
+		setbkcolor(RGB(35, 35, 35));
+		setANTIALIASED();
+		cleardevice();
+		BG = { Edge, Height - BG_H - Edge, Edge + BG_W, Height - Edge };
+		for (int i = 0; i < 4; i++)
+			for (int j = 0; j < 4; j++) {
+				map[i][j] = 0;
+				Box[i][j].left = (j + 1) * Box_Gap + j * Box_W + BG.left;
+				Box[i][j].top = (i + 1) * Box_Gap + i * Box_H + BG.top;
+				Box[i][j].right = (j + 1) * (Box_Gap + Box_W) + BG.left;
+				Box[i][j].bottom = (i + 1) * (Box_Gap + Box_W) + BG.top;
+			}
+		if (!readSaveFile()) {
+			newBox();
+			newBox();
+		}
+		copyToLast(map,score);
+		drawBG();
+	}
+	void drawBG(bool isShowGiftWord = true) {
+		cleardevice();
+		drawText(isShowGiftWord);
+		setfillcolor(COL_BG);
+		solidroundrect(BG.left, BG.top, BG.right, BG.bottom, BG_CR, BG_CR);
+		setfillcolor(COL_Box);
+		for (int i = 0; i < 4; i++)
+			for (int j = 0; j < 4; j++)
+				solidroundrect(Box[i][j].left, Box[i][j].top, Box[i][j].right, Box[i][j].bottom, Box_CR, Box_CR);
+		for (int i = 0; i < 4; i++)
+			for (int j = 0; j < 4; j++) {
+				if (!map[i][j])continue;
+				drawNumBox(map[i][j], Box[i][j]);
+			}
+	}
+	void drawText(bool isShowGiftWord = true) {
+		//2048 Title
+		setTextMode(100, "微软雅黑", 800, RGB(119, 110, 101));
+		outtextxy(20, 0, "2048");
+		//SCORE_BOX
+		setfillcolor(RGB(65, 65, 68));
+		RECT scoreBox = { 300,20,400,80 };
+		solidroundrect(scoreBox.left, scoreBox.top, scoreBox.right, scoreBox.bottom, 5, 5);
+		//SCORE_TEXT
+		setTextMode(20, "微软雅黑", 600, RGB(150, 155, 150));
+		RECT temp = scoreBox;
+		temp.bottom -= 20;
+		drawtext("SCORE", &temp, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		//SCORE_NUM
+		settextcolor(RGB(238, 225, 250));
+		temp = scoreBox;
+		temp.top += 25;
+		drawtext(to_string(score).c_str(), &temp, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		//BEST_BOX
+		setfillcolor(RGB(65, 65, 68));
+		RECT bestBox = { 415,20,515,80 };
+		solidroundrect(bestBox.left, bestBox.top, bestBox.right, bestBox.bottom, 5, 5);
+		//BEST_TEXT
+		settextcolor(RGB(150, 155, 150));
+		temp = bestBox;
+		temp.bottom -= 20;
+		drawtext("BEST", &temp, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		//BEST_NUM
+		settextcolor(RGB(238, 225, 250));
+		temp = bestBox;
+		temp.top += 25;
+		best = max(best, score);
+		drawtext(to_string(best).c_str(), &temp, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+		//newGameButton
+		setfillcolor(COL_Button);
+		newGameButton = { 360,112,490,156 };
+		solidroundrect(newGameButton.left, newGameButton.top, newGameButton.right, newGameButton.bottom, 5, 5);
+		//newGame_TEXT
+		setTextMode(22, "微软雅黑", 600, RGB(238, 225, 250));
+		drawtext(button_Text.c_str(), &newGameButton, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+		if (isShowGiftWord) {
+			setTextMode(21, "微软雅黑", 500, RGB(189, 180, 181));
+			outtextxy(20, 90, "丘院士丘吉尔丘比特皮卡丘孔丘丘神丘号斗罗");
+
+			setTextMode(55, "微软雅黑", 800, RGB(241, 200, 108));
+			outtextxy(20, 118, systime.wMonth == 8 && systime.wDay == 3 ? "Happy Birthday" : "頑張れ!");
+		}
+	}
+	void buttonCheck(void) {
+		static bool inButton = true;
+		if (!MouseHit())return;
+		MOUSEMSG msg = GetMouseMsg();
+		if (msg.x >= newGameButton.left && msg.x <= newGameButton.right && msg.y >= newGameButton.top && msg.y <= newGameButton.bottom) {
+			COL_Button = RGB(70, 75, 75);
+			if (GetKey(VK_LBUTTON)) {
+				isGameOver = true;
+				score = 0;
+				ZeroMemory(map, sizeof(map));
+				writeSaveFile();
+				Sleep(50);
+			}
+			if (!inButton)drawBG();
+			inButton = true;
+		}
+		else {
+			COL_Button = RGB(119, 110, 101);
+			if (inButton)drawBG();
+			inButton = false;
+		}
+
+		FlushMouseMsgBuffer();
+	}
+	void moveRight(void) {
+		static int old_score, old_map[4][4];
+		old_score = score, memcpy(old_map, map, sizeof(map));
+		bool isCombine[4][4] = { false };
+		int flag = 0;
+		for (int y = 0; y < 4; y++)
+			for (int x = 3; x >= 0; x--)
+				if (map[y][x])
+					flag += boxMoveRight(x, y,isCombine);
+		if (flag)newBox(), copyToLast(old_map, old_score);
+	}
+	void moveLeft(void) {
+		static int old_score, old_map[4][4];
+		old_score = score, memcpy(old_map, map, sizeof(map));
+		bool isCombine[4][4] = { false };
+		bool flag = false;
+		for (int y = 0; y < 4; y++)
+			for (int x = 0; x < 4; x++)
+				if (map[y][x])
+					flag += boxMoveLeft(x, y,isCombine);
+		if (flag)newBox(), copyToLast(old_map, old_score);
+	}
+	void moveUp(void) {
+		static int old_score, old_map[4][4];
+		old_score = score, memcpy(old_map, map, sizeof(map));
+		bool isCombine[4][4] = { false };
+		bool flag = false;
+		for (int x = 0; x < 4; x++)
+			for (int y = 0; y < 4; y++)
+				if (map[y][x])
+					flag += boxMoveUp(x, y, isCombine);
+		if (flag)newBox(), copyToLast(old_map, old_score);
+	}
+	void moveDown(void) {
+		static int old_score, old_map[4][4];
+		old_score = score, memcpy(old_map, map, sizeof(map));
+		bool isCombine[4][4] = { false };
+		bool flag = false;
+		for (int x = 0; x < 4; x++)
+			for (int y = 3; y >= 0; y--)
+				if (map[y][x])
+					flag += boxMoveDown(x, y, isCombine);
+		if (flag)newBox(), copyToLast(old_map, old_score);
+	}
+	void backToLast(void) {
+		memcpy(map, last_map, sizeof(map));
+		score = last_score;
+		writeSaveFile();
+		drawBG();
+		FlushBatchDraw();
+	}
+	bool inFocus(void) {
+		return GetForegroundWindow() == GetHWnd();
+	}
+	bool isOver(void) {
+		return isGameOver;
+	}
+private:
+	RECT BG;
+	RECT Box[4][4];
+	RECT newGameButton;
+	COLORREF COL_Button = RGB(70, 75, 75);
+	string button_Text = "New Game";
+	int map[4][4], last_map[4][4];
+	ll score, last_score;
+	ll best;
+	bool isGameOver;
+	SYSTEMTIME systime;
+	const string savePath = "D:\\2048-save.txt";//Disk C 无权限
+
+	const int BG_W = 500, BG_H = 500, Edge;
+	const int Box_W = 105, Box_H = 105, Box_Gap;
+	const int BG_CR = 12, Box_CR = 5;//Corner_R
+	const COLORREF COL_BG = RGB(70, 70, 70);
+	const COLORREF COL_Box = RGB(100, 100, 100);
+	const int Move_Speed = 10;
+
+	bool boxMoveRight(int x, int y,bool isCombine[4][4]) {
+		int n = map[y][x];
+		map[y][x] = 0;
+		bool hasBox = false;
+		int A_x = 3;
+		int dist = Box[y][3].left - Box[y][x].left;
+		for (int i = x + 1; i < 4; i++)
+			if (map[y][i]) {
+				hasBox = true;
+				if (map[y][i] == n && !isCombine[y][i])
+					A_x = i, isCombine[y][i] = true, score += n * 2LL;
+				else
+					A_x = i - 1;
+				//A_x = map[y][i] == n && !isCombine[y][i]? i : i - 1;
+				dist = Box[y][A_x].left - Box[y][x].left;
+				break;
+			}
+		int dist_now = 0;
+		while (dist_now < dist) {
+			RECT temp = { Box[y][x].left + dist_now,Box[y][x].top,Box[y][x].right + dist_now,Box[y][x].bottom };
+			drawBG();
+			drawNumBox(n, temp);
+			FlushBatchDraw();
+			dist_now+= Move_Speed;
+			//Sleep(1);
+		}
+		if (hasBox && A_x != x)
+			map[y][A_x] += n;
+		else
+			map[y][A_x] = n;
+		return dist;
+	}
+	bool boxMoveLeft(int x, int y, bool isCombine[4][4]) {
+		int n = map[y][x];
+		map[y][x] = 0;
+		bool hasBox = false;
+		int A_x = 0;
+		int dist = Box[y][0].left - Box[y][x].left;
+		for (int i = x - 1; i>=0; i--)
+			if (map[y][i]) {
+				hasBox = true;
+				if (map[y][i] == n && !isCombine[y][i])
+					A_x = i, isCombine[y][i] = true, score += n * 2LL;
+				else
+					A_x = i + 1;
+				//A_x = map[y][i] == n && !isCombine[y][i] ? i : i + 1;
+				dist = Box[y][A_x].left - Box[y][x].left;
+				break;
+			}
+		int dist_now = 0;
+		while (dist_now > dist) {
+			RECT temp = { Box[y][x].left + dist_now,Box[y][x].top,Box[y][x].right + dist_now,Box[y][x].bottom };
+			drawBG();
+			drawNumBox(n, temp);
+			FlushBatchDraw();
+			dist_now -= Move_Speed;
+			//Sleep(1);
+		}
+		if (hasBox && A_x != x)
+			map[y][A_x] += n;
+		else
+			map[y][A_x] = n;
+		return dist;
+	}
+	bool boxMoveUp(int x, int y, bool isCombine[4][4]) {
+		int n = map[y][x];
+		map[y][x] = 0;
+		bool hasBox = false;
+		int A_y = 0;
+		int dist = Box[0][x].top - Box[y][x].top;
+		for (int i = y - 1; i >= 0; i--)
+			if (map[i][x]) {
+				hasBox = true;
+				if (map[i][x] == n && !isCombine[i][x])
+					A_y = i, isCombine[i][x] = true, score += n * 2LL;
+				else
+					A_y = i + 1;
+				//A_y = map[i][x] == n && !isCombine[i][x] ? i : i + 1;
+				dist = Box[A_y][x].top - Box[y][x].top;
+				break;
+			}
+		int dist_now = 0;
+		while (dist_now > dist) {
+			RECT temp = { Box[y][x].left,Box[y][x].top + dist_now,Box[y][x].right,Box[y][x].bottom + dist_now };
+			drawBG();
+			drawNumBox(n, temp);
+			FlushBatchDraw();
+			dist_now -= Move_Speed;
+			//Sleep(1);
+		}
+		if (hasBox && A_y != y)
+			map[A_y][x] += n;
+		else
+			map[A_y][x] = n;
+		return dist;
+	}
+	bool boxMoveDown(int x, int y, bool isCombine[4][4]) {
+		int n = map[y][x];
+		map[y][x] = 0;
+		bool hasBox = false;
+		int A_y = 3;
+		int dist = Box[3][x].top - Box[y][x].top;
+		for (int i = y + 1; i < 4; i++)
+			if (map[i][x]) {
+				hasBox = true;
+				if (map[i][x] == n && !isCombine[i][x])
+					A_y = i, isCombine[i][x] = true, score += n * 2LL;
+				else
+					A_y = i - 1;
+				//A_y = map[i][x] == n && !isCombine[i][x] ? i : i - 1;
+				dist = Box[A_y][x].top - Box[y][x].top;
+				break;
+			}
+		int dist_now = 0;
+		while (dist_now < dist) {
+			RECT temp = { Box[y][x].left,Box[y][x].top + dist_now,Box[y][x].right,Box[y][x].bottom + dist_now };
+			drawBG();
+			drawNumBox(n, temp);
+			FlushBatchDraw();
+			dist_now += Move_Speed;
+			//Sleep(1);
+		}
+		if (hasBox && A_y != y)
+			map[A_y][x] += n;
+		else
+			map[A_y][x] = n;
+		return dist;
+	}
+	bool isFailed(void) {
+		for (int y = 0; y < 4; y++)
+			for (int x = 0; x < 4; x++)
+				if (!map[y][x])//not fill
+					return false;
+		for (int y = 0; y < 4; y++)
+			for (int x = 0; x < 3; x++)
+				if (map[y][x] == map[y][x + 1])
+					return false;
+		for (int x = 0; x < 4; x++)
+			for (int y = 0; y < 3; y++)
+				if (map[y][x] == map[y + 1][x])
+					return false;
+		return true;
+	}
+
+	void setANTIALIASED(void) {// 设置输出效果为抗锯齿
+		LOGFONT f;
+		gettextstyle(&f);						// 获取当前字体设置
+		f.lfQuality = ANTIALIASED_QUALITY;		// 设置输出效果为抗锯齿  
+		settextstyle(&f);
+	}
+	void setFontSizeByRect(RECT rect, string text) {
+		int W = (rect.right - rect.left);
+		static int FontSize[35] = { 0 };
+		int H = W;
+		int index = log2(atoi(text.c_str()));
+		if (W == Box_W && FontSize[index])
+			H = FontSize[index];
+		do {
+			settextstyle(H, 0, "微软雅黑", 0, 0, 800, 0, 0, 0);
+		} while (textwidth(text.c_str()) > (W - 20) && H--);
+		if (W == Box_W)FontSize[index] = H;
+	}
+	void drawSolidBox(int num, RECT rect) {
+		int col = 235 - log2(num) * 7;
+		setfillcolor(RGB(225, 225, col));
+		solidroundrect(rect.left, rect.top, rect.right, rect.bottom, Box_CR, Box_CR);
+	}
+	void drawNumInRect(int num, RECT rect) {
+		string text = to_string(num);
+		setFontSizeByRect(rect, text);
+		drawtext(text.c_str(), &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	}
+	void drawNumBox(int num, RECT rect) {
+		settextcolor(RGB(50, 50, 50));
+		drawSolidBox(num, rect);
+		drawNumInRect(num, rect);
+	}
+	void setTextMode(int nHeight, LPCTSTR lpszFace, int nWeight, COLORREF color) {
+		settextstyle(nHeight, 0, lpszFace, 0, 0, nWeight, 0, 0, 0);
+		settextcolor(color);
+	}
+
+	bool readSaveFile(void) {
+		FILE* fp = fopen(savePath.c_str(), "rb");
+		if (!fp)return false;
+		fread(&score, sizeof(score), 1, fp);
+		fread(&best, sizeof(best), 1, fp);
+		fread(map, sizeof(map), 1, fp);
+		fclose(fp);
+		bool flag = false;
+		for (int i = 0; i < 4; i++)
+			for (int j = 0; j < 4; j++)
+				flag += map[i][j];
+		return flag;
+	}
+	void writeSaveFile(void) {
+		FILE* fp = fopen(savePath.c_str(), "wb");
+		if (!fp)return;
+		fwrite(&score, sizeof(score), 1, fp);
+		fwrite(&best, sizeof(best), 1, fp);
+		fwrite(map, sizeof(map), 1, fp);
+		fclose(fp);
+	}
+
+	void newBox(void) {
+		int x, y, n;
+		do {
+			x = rand() % 4, y = rand() % 4, n = rand() % 10;
+		} while (map[y][x]);
+		n = n ? 2 : 4;
+
+		settextcolor(RGB(50, 50, 50));
+		int gap = (Box[y][x].right - Box[y][x].left - 2) / 2;
+		while (gap >= 0) {
+			RECT temp = { Box[y][x].left + gap, Box[y][x].top + gap, Box[y][x].right - gap, Box[y][x].bottom - gap };
+			drawBG();
+			drawNumBox(n, temp);
+			FlushBatchDraw();
+			gap--;
+			Sleep(1);
+		}
+		map[y][x] = n;
+
+		if (isFailed()) {
+			button_Text = "Try Again";
+			while (!isOver()) {
+				buttonCheck();
+				drawBG(false);
+				setTextMode(75, "微软雅黑", 800, RGB(138, 71, 71));
+				outtextxy(20, 95, "GameOver!");
+
+				FlushBatchDraw();
+				Sleep(5);
+			}
+		}
+		else
+			writeSaveFile();//导致死亡的最后一个box不会被写入save，重启程序即可回退一步
+	}//						这不是bug，是特性~~(doge)
+
+	void copyToLast(int map[4][4],int score) {
+		memcpy(last_map, map, sizeof(last_map));
+		last_score = score;
+	}
+};
+void initWinPos_Title(HWND hwnd, string newTitle);
+RECT getTrueClientRect(HWND hwnd);
+void init(int& Width, int& Height);
+int main(void)
+{
+	initgraph(WIDTH, HEIGHT);
+	BeginBatchDraw();
+	init(Width, Height);
+
+	while (true) {
+		Game game(Width, Height);
+		while (!game.isOver()) {
+			while (!game.inFocus())
+				Sleep(5);
+
+			if (GetKey(VK_RIGHT))
+				game.moveRight();
+			else if (GetKey(VK_LEFT))
+				game.moveLeft();
+			else if (GetKey(VK_UP))
+				game.moveUp();
+			else if (GetKey(VK_DOWN))
+				game.moveDown();
+			else if (GetKey('R'))
+				game.backToLast();
+
+			game.buttonCheck();
+			FlushBatchDraw();
+			Sleep(5);
+		}
+	}
+	return 0;
+}
+void initWinPos_Title(HWND hwnd, string newTitle) {
+	int Screen_W = GetSystemMetrics(SM_CXSCREEN);//Screen_X
+	int Screen_H = GetSystemMetrics(SM_CYSCREEN);//Screen_Y
+	MoveWindow(hwnd, Screen_W / 2 - WIDTH / 2, Screen_H / 2 - HEIGHT / 2, WIDTH, HEIGHT, true);
+	if (newTitle != "")
+		SetWindowTextA(hwnd, newTitle.c_str());
+}
+RECT getTrueClientRect(HWND hwnd) {
+	RECT rect, Crect;
+	GetClientRect(hwnd, &Crect);//获取客户端矩阵（不含标题栏）
+	GetWindowRect(hwnd, &rect);
+	const int offset = ((rect.right - rect.left) - (Crect.right - Crect.left)) / 2;
+	int cap = (rect.bottom - offset - rect.top) - (Crect.bottom - Crect.top);
+	int left, top, right, bottom;
+	left = rect.left + offset;
+	right = rect.right - offset;
+	top = rect.top + cap;
+	bottom = rect.bottom - offset;
+	return { left,top,right,bottom };
+}
+void init(int& Width, int& Height) {
+	HWND hwnd = GetHWnd();//!!
+	initWinPos_Title(hwnd, "2048 v2.0 [By MrBeanC]");
+	RECT rect = getTrueClientRect(hwnd);
+	Width = rect.right - rect.left;
+	Height = rect.bottom - rect.top;
+}
