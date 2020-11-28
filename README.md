@@ -1,5 +1,5 @@
 # 2048-in-Windows
-2048 in Windows with C++ easyX
+2048 in Windows with C++ easyX  
 UI设计采用暗黑风格  
 采用单线程设计，以并进的方式处理按键检测与动画播放  
 每一次操作后，自动保存，并支持R键返回上一步  
